@@ -1,8 +1,16 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import "./dashboard.css";
+import {
+  formatTelemetryTime,
+  getDemoTelemetry,
+  getTruckStatus,
+  initialTelemetry,
+  type Truck,
+  type TruckStatus,
+} from "./telemetry-data";
 
 type Severity = "Critical" | "High" | "Medium" | "Low";
 type Risk = {
@@ -222,10 +230,86 @@ export default function Dashboard() {
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [selectedSite, setSelectedSite] = useState("Singareni Mine — Site 04");
+  const [telemetry, setTelemetry] = useState(initialTelemetry);
+  const [selectedTruckId, setSelectedTruckId] = useState<Truck["id"]>("TRUCK-02");
+  const [demoPhase, setDemoPhase] = useState(0);
+  const [demoRunning, setDemoRunning] = useState(false);
+  const [telemetryNow, setTelemetryNow] = useState(0);
   const filteredRisks =
     alertFilter === "All"
       ? risks
       : risks.filter((risk) => risk.severity === alertFilter);
+  useEffect(() => {
+    let tick = 0;
+    const interval = window.setInterval(() => {
+      const updatedAt = Date.now();
+      setTelemetryNow(updatedAt);
+      if (demoRunning) return;
+      tick += 1;
+      const distanceOne = [8.4, 8.1, 8.6][tick % 3];
+      const distanceTwo = [8.1, 7.8, 8.3][tick % 3];
+      setTelemetry((current) => current.map((truck, index) => ({
+        ...truck,
+        sensor: {
+          ...truck.sensor,
+          distance: index === 0 ? distanceOne : distanceTwo,
+          tilt: index === 0 ? [2.4, 2.6, 2.2][tick % 3] : [3.1, 3.3, 2.9][tick % 3],
+          updatedAt,
+        },
+      })));
+    }, 2500);
+    return () => window.clearInterval(interval);
+  }, [demoRunning]);
+  useEffect(() => {
+    if (!demoRunning) return;
+    const interval = window.setInterval(() => {
+      setDemoPhase((phase) => {
+        const updatedAt = Date.now();
+        if (phase >= 5) {
+          setDemoRunning(false);
+          return phase;
+        }
+        const nextPhase = phase + 1;
+        setTelemetry(getDemoTelemetry(nextPhase, updatedAt));
+        setTelemetryNow(updatedAt);
+        return nextPhase;
+      });
+    }, 1600);
+    return () => window.clearInterval(interval);
+  }, [demoRunning]);
+  const startDemo = () => {
+    const updatedAt = Date.now();
+    setDemoPhase(0);
+    setDemoRunning(true);
+    setTelemetry(getDemoTelemetry(0, updatedAt));
+    setTelemetryNow(updatedAt);
+  };
+  const resetDemo = () => {
+    const updatedAt = Date.now();
+    setDemoRunning(false);
+    setDemoPhase(0);
+    setTelemetry(initialTelemetry.map((truck) => ({
+      ...truck,
+      sensor: { ...truck.sensor, updatedAt },
+    })));
+    setTelemetryNow(updatedAt);
+  };
+  const selectedTruck = telemetry.find((truck) => truck.id === selectedTruckId) ?? telemetry[0];
+  const selectedStatus = getTruckStatus(selectedTruck.sensor);
+  const criticalTruck = telemetry.find((truck) => getTruckStatus(truck.sensor) === "CRITICAL");
+  const demoMessage = demoPhase >= 5
+    ? "Sudden impact detected. Operator response required immediately."
+    : demoPhase >= 3
+      ? "Dangerous tilt detected on the east ridge haul road."
+      : demoPhase >= 1
+        ? "Obstacle detected within the Truck-02 safety threshold."
+        : "All vehicle sensors are within the normal operating range.";
+  const alertHistory = [
+    ...(demoPhase >= 5 ? [{ id: "demo-impact", truckId: "TRUCK-02", title: "Sudden impact detected", sensor: "MPU6050", severity: "CRITICAL" as TruckStatus, location: "East Ridge haul road", time: formatTelemetryTime(telemetryNow) }] : []),
+    ...(demoPhase >= 3 ? [{ id: "demo-tilt", truckId: "TRUCK-02", title: "Dangerous tilt detected", sensor: "MPU6050", severity: "CRITICAL" as TruckStatus, location: "East Ridge haul road", time: formatTelemetryTime(telemetryNow - 1600) }] : []),
+    ...(demoPhase >= 1 ? [{ id: "demo-obstacle", truckId: "TRUCK-02", title: `Obstacle detected at ${telemetry[1].sensor.distance.toFixed(1)}m`, sensor: "HC-SR04", severity: (demoPhase >= 3 ? "CRITICAL" : "WARNING") as TruckStatus, location: "East Ridge haul road", time: formatTelemetryTime(telemetryNow - 3200) }] : []),
+    { id: "baseline-check", truckId: "TRUCK-01", title: "Vehicle telemetry healthy", sensor: "HC-SR04" as const, severity: "NORMAL" as TruckStatus, location: "Crusher haul road", time: "10:42:18" },
+  ];
   return (
     <div className="dashboard-shell">
       <aside className="dashboard-sidebar">
@@ -416,6 +500,91 @@ export default function Dashboard() {
               <small>Risk level: Low</small>
             </div>
             <time>Last updated 2 min ago</time>
+          </section>
+          <section className="demo-command panel">
+            <div>
+              <p className="panel-kicker">Presentation controls</p>
+              <h2>MineSafe Safety Command Center</h2>
+              <p>Run a deterministic vehicle safety scenario from healthy telemetry to operator response.</p>
+            </div>
+            <div className="demo-actions">
+              <span className="demo-mode-badge">DEMO MODE — Simulated Sensor Data</span>
+              <button className="demo-button demo-button-primary" onClick={startDemo} disabled={demoRunning}>
+                {demoRunning ? `Demo running · Phase ${Math.min(demoPhase + 1, 5)}/5` : "Start demo"}
+              </button>
+              <button className="demo-button" onClick={resetDemo}>Reset</button>
+            </div>
+          </section>
+          {criticalTruck && (
+            <section className="emergency-alert" aria-live="assertive">
+              <div className="emergency-alert-mark">!</div>
+              <div>
+                <p className="panel-kicker">Critical emergency alert</p>
+                <h2>{criticalTruck.id}: {demoMessage}</h2>
+                <p>Severity: CRITICAL · Sensor: {criticalTruck.sensor.impact ? "MPU6050" : "HC-SR04 / MPU6050"} · Location: East Ridge haul road</p>
+              </div>
+              <time>{formatTelemetryTime(criticalTruck.sensor.updatedAt)}</time>
+            </section>
+          )}
+          <section className="fleet-section">
+            <div className="section-title fleet-heading">
+              <div>
+                <p className="panel-kicker">Live fleet overview</p>
+                <h2>Two trucks, one safety picture</h2>
+              </div>
+              <span className="telemetry-live"><i /> Sensors updating live</span>
+            </div>
+            <div className="fleet-grid">
+              {telemetry.map((truck) => (
+                <TruckCard
+                  key={`${truck.id}-${truck.sensor.updatedAt}`}
+                  truck={truck}
+                  status={getTruckStatus(truck.sensor)}
+                  selected={truck.id === selectedTruckId}
+                  onSelect={() => setSelectedTruckId(truck.id)}
+                />
+              ))}
+            </div>
+          </section>
+          <section className="telemetry-layout">
+            <div className="panel telemetry-panel">
+              <div className="panel-header">
+                <div>
+                  <p className="panel-kicker">Sensor monitoring</p>
+                  <h2>{selectedTruck.id} telemetry</h2>
+                </div>
+                <span className={`status-chip status-chip-${selectedStatus.toLowerCase()}`}><i /> {selectedStatus}</span>
+              </div>
+              <div className="sensor-grid">
+                <SensorCard label="HC-SR04" title="Obstacle distance" value={selectedTruck.sensor.distance.toFixed(1)} unit="m" detail={selectedTruck.sensor.distance < 3 ? "Safety threshold reached" : "Clear operating distance"} tone={selectedTruck.sensor.distance < 3 ? "warning" : "normal"} />
+                <SensorCard label="MPU6050" title="Tilt angle" value={selectedTruck.sensor.tilt.toFixed(1)} unit="°" detail={`${selectedTruck.sensor.acceleration.toFixed(2)} g acceleration`} tone={selectedStatus === "CRITICAL" ? "critical" : selectedStatus === "WARNING" ? "warning" : "normal"} />
+                <SensorCard label="MPU6050" title="Impact state" value={selectedTruck.sensor.impact ? "DETECTED" : "NORMAL"} detail={selectedTruck.sensor.impact ? "Immediate inspection required" : "No abnormal impact"} tone={selectedTruck.sensor.impact ? "critical" : "normal"} />
+                <SensorCard label="NEO-6M" title="GPS signal" value={selectedTruck.sensor.gps.signal} detail={`${selectedTruck.sensor.gps.latitude.toFixed(4)}, ${selectedTruck.sensor.gps.longitude.toFixed(4)}`} tone="normal" />
+              </div>
+              <p className="telemetry-updated">Last updated {telemetryNow === 0 ? 0 : Math.max(0, Math.floor((telemetryNow - selectedTruck.sensor.updatedAt) / 1000))} seconds ago · {telemetryNow === 0 ? "Awaiting sync" : formatTelemetryTime(selectedTruck.sensor.updatedAt)}</p>
+            </div>
+            <div className="panel alert-history-panel">
+              <div className="panel-header">
+                <div>
+                  <p className="panel-kicker">Operator queue</p>
+                  <h2>Alert history</h2>
+                </div>
+                <span className="alert-count">{alertHistory.length.toString().padStart(2, "0")}</span>
+              </div>
+              <div className="telemetry-alert-list">
+                {alertHistory.map((alert) => (
+                  <div className="telemetry-alert" key={alert.id}>
+                    <span className={`severity severity-${alert.severity.toLowerCase()}`} />
+                    <div>
+                      <strong>{alert.title}</strong>
+                      <p>{alert.truckId} · {alert.sensor} · {alert.time}</p>
+                      <small>{alert.location}</small>
+                    </div>
+                    <b className={`severity-text-${alert.severity.toLowerCase()}`}>{alert.severity}</b>
+                  </div>
+                ))}
+              </div>
+            </div>
           </section>
           <div className="dashboard-grid">
             <section className="panel map-panel">
@@ -646,4 +815,72 @@ function Metric({
     </>
   );
   return href ? <Link className="metric-card metric-card-link" href={href}>{content}</Link> : <article className="metric-card">{content}</article>;
+}
+
+function TruckCard({
+  truck,
+  status,
+  selected,
+  onSelect,
+}: {
+  truck: Truck;
+  status: TruckStatus;
+  selected: boolean;
+  onSelect: () => void;
+}) {
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+
+  useEffect(() => {
+    const interval = window.setInterval(() => {
+      setElapsedSeconds(Math.max(0, Math.floor((Date.now() - truck.sensor.updatedAt) / 1000)));
+    }, 1000);
+    return () => window.clearInterval(interval);
+  }, [truck.sensor.updatedAt]);
+
+  return (
+    <button className={`truck-card ${selected ? "truck-card-selected" : ""}`} onClick={onSelect}>
+      <div className="truck-card-topline">
+        <span className="truck-symbol">▰</span>
+        <span className={`status-chip status-chip-${status.toLowerCase()}`}><i /> {status}</span>
+      </div>
+      <div className="truck-card-title">
+        <div>
+          <p className="panel-kicker">{truck.name}</p>
+          <h3>{truck.id}</h3>
+        </div>
+        <span className="truck-updated">{elapsedSeconds}s ago</span>
+      </div>
+      <div className="truck-readings">
+        <span><small>Distance</small><strong>{truck.sensor.distance.toFixed(1)}<em> m</em></strong></span>
+        <span><small>Tilt</small><strong>{truck.sensor.tilt.toFixed(1)}<em>°</em></strong></span>
+        <span><small>Impact</small><strong className={truck.sensor.impact ? "reading-critical" : ""}>{truck.sensor.impact ? "Detected" : "Normal"}</strong></span>
+      </div>
+      <p className="truck-gps"><span>NEO-6M GPS</span> {truck.sensor.gps.latitude.toFixed(4)}, {truck.sensor.gps.longitude.toFixed(4)}</p>
+    </button>
+  );
+}
+
+function SensorCard({
+  label,
+  title,
+  value,
+  unit,
+  detail,
+  tone,
+}: {
+  label: string;
+  title: string;
+  value: string;
+  unit?: string;
+  detail: string;
+  tone: "normal" | "warning" | "critical";
+}) {
+  return (
+    <article className={`sensor-card sensor-card-${tone}`}>
+      <div className="sensor-card-label"><span>{label}</span><i /></div>
+      <p>{title}</p>
+      <strong>{value}<small>{unit}</small></strong>
+      <span className="sensor-card-detail">{detail}</span>
+    </article>
+  );
 }
