@@ -1,4 +1,5 @@
 export type TruckStatus = "NORMAL" | "WARNING" | "CRITICAL";
+export type SensorStatus = "NORMAL" | "WARNING" | "CRITICAL";
 
 export type GPSData = {
   latitude: number;
@@ -66,6 +67,18 @@ export function getTruckStatus(sensor: SensorData): TruckStatus {
     return "WARNING";
   }
   return "NORMAL";
+}
+
+export function getSensorStatuses(sensor: SensorData): {
+  distance: SensorStatus;
+  motion: SensorStatus;
+  gps: SensorStatus;
+} {
+  return {
+    distance: sensor.distance < 1.5 ? "CRITICAL" : sensor.distance <= 3 ? "WARNING" : "NORMAL",
+    motion: sensor.impact ? "CRITICAL" : sensor.tilt >= 8 ? sensor.tilt > 15 ? "CRITICAL" : "WARNING" : "NORMAL",
+    gps: sensor.gps.signal === "Searching" ? "WARNING" : "NORMAL",
+  };
 }
 
 export function getDemoTelemetry(phase: number, updatedAt: number): Truck[] {

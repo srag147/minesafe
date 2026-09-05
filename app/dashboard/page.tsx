@@ -6,6 +6,7 @@ import "./dashboard.css";
 import {
   formatTelemetryTime,
   getDemoTelemetry,
+  getSensorStatuses,
   getTruckStatus,
   initialTelemetry,
   type Truck,
@@ -254,6 +255,11 @@ export default function Dashboard() {
           ...truck.sensor,
           distance: index === 0 ? distanceOne : distanceTwo,
           tilt: index === 0 ? [2.4, 2.6, 2.2][tick % 3] : [3.1, 3.3, 2.9][tick % 3],
+          gps: {
+            ...truck.sensor.gps,
+            latitude: truck.sensor.gps.latitude + (index === 0 ? 0.0001 : 0.00008),
+            longitude: truck.sensor.gps.longitude - (index === 0 ? 0.0001 : 0.00006),
+          },
           updatedAt,
         },
       })));
@@ -296,6 +302,7 @@ export default function Dashboard() {
   };
   const selectedTruck = telemetry.find((truck) => truck.id === selectedTruckId) ?? telemetry[0];
   const selectedStatus = getTruckStatus(selectedTruck.sensor);
+  const selectedSensorStatuses = getSensorStatuses(selectedTruck.sensor);
   const criticalTruck = telemetry.find((truck) => getTruckStatus(truck.sensor) === "CRITICAL");
   const demoMessage = demoPhase >= 5
     ? "Sudden impact detected. Operator response required immediately."
@@ -551,15 +558,15 @@ export default function Dashboard() {
               <div className="panel-header">
                 <div>
                   <p className="panel-kicker">Sensor monitoring</p>
-                  <h2>{selectedTruck.id} telemetry</h2>
+                  <h2>{selectedTruck.id} live sensor status</h2>
                 </div>
                 <span className={`status-chip status-chip-${selectedStatus.toLowerCase()}`}><i /> {selectedStatus}</span>
               </div>
               <div className="sensor-grid">
-                <SensorCard label="HC-SR04" title="Obstacle distance" value={selectedTruck.sensor.distance.toFixed(1)} unit="m" detail={selectedTruck.sensor.distance < 3 ? "Safety threshold reached" : "Clear operating distance"} tone={selectedTruck.sensor.distance < 3 ? "warning" : "normal"} />
-                <SensorCard label="MPU6050" title="Tilt angle" value={selectedTruck.sensor.tilt.toFixed(1)} unit="°" detail={`${selectedTruck.sensor.acceleration.toFixed(2)} g acceleration`} tone={selectedStatus === "CRITICAL" ? "critical" : selectedStatus === "WARNING" ? "warning" : "normal"} />
-                <SensorCard label="MPU6050" title="Impact state" value={selectedTruck.sensor.impact ? "DETECTED" : "NORMAL"} detail={selectedTruck.sensor.impact ? "Immediate inspection required" : "No abnormal impact"} tone={selectedTruck.sensor.impact ? "critical" : "normal"} />
-                <SensorCard label="NEO-6M" title="GPS signal" value={selectedTruck.sensor.gps.signal} detail={`${selectedTruck.sensor.gps.latitude.toFixed(4)}, ${selectedTruck.sensor.gps.longitude.toFixed(4)}`} tone="normal" />
+                <SensorCard label="HC-SR04" title="Proximity distance" value={Math.round(selectedTruck.sensor.distance * 100).toString()} unit="cm" detail={selectedTruck.sensor.distance < 3 ? "Obstacle threshold reached" : "Clear operating distance"} status={selectedSensorStatuses.distance} />
+                <SensorCard label="MPU6050" title="Motion and tilt" value={selectedTruck.sensor.tilt.toFixed(1)} unit="°" detail={`${selectedTruck.sensor.acceleration.toFixed(2)} g · ${selectedTruck.sensor.impact ? "Impact detected" : "No impact"}`} status={selectedSensorStatuses.motion} />
+                <SensorCard label="MPU6050" title="Impact state" value={selectedTruck.sensor.impact ? "DETECTED" : "NORMAL"} detail={selectedTruck.sensor.impact ? "Immediate inspection required" : "Motion within safe range"} status={selectedSensorStatuses.motion} />
+                <SensorCard label="NEO-6M" title="GPS location" value={selectedTruck.sensor.gps.signal} detail={`${selectedTruck.sensor.gps.latitude.toFixed(4)}, ${selectedTruck.sensor.gps.longitude.toFixed(4)}`} status={selectedSensorStatuses.gps} />
               </div>
               <p className="telemetry-updated">Last updated {telemetryNow === 0 ? 0 : Math.max(0, Math.floor((telemetryNow - selectedTruck.sensor.updatedAt) / 1000))} seconds ago · {telemetryNow === 0 ? "Awaiting sync" : formatTelemetryTime(selectedTruck.sensor.updatedAt)}</p>
             </div>
@@ -866,18 +873,18 @@ function SensorCard({
   value,
   unit,
   detail,
-  tone,
+  status,
 }: {
   label: string;
   title: string;
   value: string;
   unit?: string;
   detail: string;
-  tone: "normal" | "warning" | "critical";
+  status: "NORMAL" | "WARNING" | "CRITICAL";
 }) {
   return (
-    <article className={`sensor-card sensor-card-${tone}`}>
-      <div className="sensor-card-label"><span>{label}</span><i /></div>
+    <article className={`sensor-card sensor-card-${status.toLowerCase()}`}>
+      <div className="sensor-card-label"><span>{label}</span><b className={`sensor-status sensor-status-${status.toLowerCase()}`}><i /> {status}</b></div>
       <p>{title}</p>
       <strong>{value}<small>{unit}</small></strong>
       <span className="sensor-card-detail">{detail}</span>
